@@ -1,0 +1,30 @@
+# build
+build/
+out/
+classes/
+*.jar.original
+
+# ide
+.idea/
+.vscode/
+*.iml
+
+# gradle
+.gradle/
+
+# local tooling
+.tools/
+
+# run
+run/
+runs/
+kjs_out/
+
+# reference source clones (read-only API reference)
+refs/
+
+# logs
+*.log
+
+# local helper scripts (package guard etc.)
+.tools-check/

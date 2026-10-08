@@ -1,0 +1,49 @@
+modLoader = "javafml"
+loaderVersion = "[47,)"
+license = "${mod_license}"
+
+[[mods]]
+    modId = "${mod_id}"
+    version = "${version}"
+    displayName = "快捷仓室 Quick Hatch"
+    displayURL = "${mod_url}"
+    authors = "${mod_author}"
+    description = '''
+快捷仓室：一个 GregTech CEu Modern 辅助模组。
+G 键打开仓室选择界面，按分类与电压筛选仓室/线缆/管道/AE2 物品，
+支持从物品栏、精妙背包或无线终端所在 ME 网络一键拉取，
+并可在多方块结构上直接替换放置仓室。
+'''
+    # GTCEu Modern is required
+    [[dependencies.${mod_id}]]
+        modId = "forge"
+        mandatory = true
+        versionRange = "[${forge_version},)"
+        ordering = "NONE"
+        side = "BOTH"
+    [[dependencies.${mod_id}]]
+        modId = "minecraft"
+        mandatory = true
+        versionRange = "[${minecraft_version},)"
+        ordering = "NONE"
+        side = "BOTH"
+    [[dependencies.${mod_id}]]
+        modId = "gtceu"
+        mandatory = true
+        versionRange = "[${gtceu_version},)"
+        ordering = "AFTER"
+        side = "BOTH"
+    # AE2 is optional: ME item pull through wireless terminals
+    [[dependencies.${mod_id}]]
+        modId = "ae2"
+        mandatory = false
+        versionRange = "[15.0.0,)"
+        ordering = "AFTER"
+        side = "BOTH"
+    # Curios is optional: wireless terminals usually live in curios slots
+    [[dependencies.${mod_id}]]
+        modId = "curios"
+        mandatory = false
+        versionRange = "[5.0.0,)"
+        ordering = "AFTER"
+        side = "BOTH"

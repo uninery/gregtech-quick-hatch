@@ -1,0 +1,177 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev.legacyforge' version '2.0.91'
+}
+
+sourceSets {
+    main.resources {
+        srcDir 'src/generated/resources'
+    }
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+    maven {
+        name = 'GTCEu Maven'
+        url = 'https://maven.gtceu.com'
+        content {
+            includeGroup 'com.gregtechceu.gtceu'
+        }
+    }
+    maven {
+        name = 'FirstDarkDev'
+        url = 'https://maven.firstdark.dev/snapshots/'
+        content {
+            includeGroup 'com.lowdragmc.ldlib'
+            includeGroup 'dev.toma.configuration'
+        }
+    }
+    maven { // Registrate
+        url = 'https://maven.tterrag.com/'
+        content {
+            includeGroup 'com.tterrag.registrate'
+        }
+    }
+    maven {
+        // Applied Energistics 2
+        name = 'modmaven'
+        url = 'https://modmaven.dev/'
+        content {
+            includeGroup 'appeng'
+        }
+    }
+    maven {
+        // Configuration
+        url = 'https://maven.resourcefulbees.com/repository/toma/'
+        content {
+            includeGroup 'dev.toma.configuration'
+        }
+    }
+    maven {
+        // CurseForge File (Curios 等)
+        url = 'https://cursemaven.com/'
+        content {
+            includeGroup 'curse.maven'
+        }
+    }
+    maven {
+        // Architectury（ae2wtlib 的前置）
+        name = 'Architectury'
+        url = 'https://maven.architectury.dev/'
+        content {
+            includeGroup 'dev.architectury'
+        }
+    }
+    maven {
+        // Cloth Config（ae2wtlib 的前置）
+        name = 'Shedaniel'
+        url = 'https://maven.shedaniel.me/'
+        content {
+            includeGroup 'me.shedaniel.cloth'
+        }
+    }
+}
+
+version = mod_version
+group = maven_group
+base { archivesName = archives_base_name }
+java { sourceCompatibility = targetCompatibility = JavaVersion.VERSION_17 }
+
+legacyForge {
+    version = project.minecraft_version + '-' + project.forge_version
+
+    parchment {
+        mappingsVersion = project.mapping_version
+        minecraftVersion = project.minecraft_version
+    }
+
+    runs {
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.INFO
+        }
+        client {
+            client()
+            sourceSet = sourceSets.main
+        }
+        server {
+            server()
+            sourceSet = sourceSets.main
+            programArguments.addAll('--nogui')
+            systemProperty('quickhatch.selftest', 'true')
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+dependencies {
+    compileOnly("org.jetbrains:annotations:24.0.1")
+
+    // GregTech CEu Modern and dependencies
+    modImplementation("com.gregtechceu.gtceu:gtceu-${minecraft_version}:${gtceu_version}:slim") { transitive = false }
+    modImplementation("com.lowdragmc.ldlib:ldlib-forge-${minecraft_version}:${ldlib_version}") { transitive = false }
+    modImplementation("com.tterrag.registrate:Registrate:${registrate_version}")
+    modImplementation("dev.toma.configuration:configuration-forge-${minecraft_version}:${configuration_version}")
+
+    // Applied Energistics 2 (soft dependency, compile against API)
+    modCompileOnly("appeng:appliedenergistics2-forge:${ae2_version}") { transitive = false }
+
+    // ae2wtlib（AE2 Wireless Terminals，软依赖：饰品槽里的无线通用终端要用它自己的宿主）
+    modCompileOnly("curse.maven:applied-energistics-2-wireless-terminals-459929:${ae2wtlib_version}") {
+        transitive = false
+    }
+
+    // Curios（饰品栏，软依赖：无线终端通常放在饰品槽）
+    modCompileOnly("curse.maven:curios-309927:6418456") { transitive = false }
+
+    // 仅开发环境：把 AE2 / GuideME / Curios / ae2wtlib（+前置）拉进跑起来的运行时，
+    // 方便实测无线终端（物品栏、饰品槽、背包）与 AE 分类。modRuntimeOnly 不进发布产物。
+    modRuntimeOnly("curse.maven:curios-309927:6418456") { transitive = false }
+    if (!project.hasProperty('noAe2Runtime')) {
+        modRuntimeOnly("appeng:appliedenergistics2-forge:${ae2_version}") { transitive = false }
+        modRuntimeOnly("curse.maven:guideme-1173950:7127447") { transitive = false }
+    }
+    // -PnoAe2Runtime 或 -PnoWTLibRuntime 都可以单独验证"没装 ae2wtlib"时的类隔离
+    if (!project.hasProperty('noAe2Runtime') && !project.hasProperty('noWTLibRuntime')) {
+        modRuntimeOnly("curse.maven:applied-energistics-2-wireless-terminals-459929:${ae2wtlib_version}") {
+            transitive = false
+        }
+        modRuntimeOnly("dev.architectury:architectury-forge:${architectury_version}") { transitive = false }
+        modRuntimeOnly("me.shedaniel.cloth:cloth-config-forge:${cloth_config_version}") { transitive = false }
+    }
+}
+
+tasks.named('jar', Jar).configure { finalizedBy 'reobfJar' }
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release.set(17)
+    // 本机 javac 默认中文 locale，控制台会乱码；强制英文好排查编译错误
+    options.forkOptions.jvmArgs.add('-Duser.language=en')
+    options.forkOptions.jvmArgs.add('-Duser.country=US')
+}
+
+tasks.withType(ProcessResources).configureEach {
+    filteringCharset = 'UTF-8'
+    var properties = [
+            "mod_license"     : mod_license,
+            "mod_id"          : mod_id,
+            "version"         : version,
+            "mod_name"        : mod_name,
+            "mod_url"         : mod_url,
+            "mod_author"      : mod_author,
+            "forge_version"   : forge_version.split("\\.")[0],
+            "minecraft_version": minecraft_version,
+            "gtceu_version"   : gtceu_version,
+    ]
+    inputs.properties(properties)
+
+    filesMatching('META-INF/mods.toml') {
+        expand properties + [project: project]
+    }
+}
