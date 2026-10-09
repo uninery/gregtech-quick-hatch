@@ -39,6 +39,14 @@ public final class ReplaceService {
     private ReplaceService() {}
 
     public static void handle(ServerboundReplaceHatchPacket msg, ServerPlayer player) {
+        handle(msg, player, player != null && player.isCreative());
+    }
+
+    /**
+     * @param creative 是否创造模式。单独当参数传是为了让自检能直接跑创造那条分支
+     *                 （{@code FakePlayer#isCreative()} 返回什么并不可靠）。
+     */
+    static void handle(ServerboundReplaceHatchPacket msg, ServerPlayer player, boolean creative) {
         if (player == null) return;
         Item item = BuiltInRegistries.ITEM.get(msg.item());
         if (item == Items.AIR || !msg.item().equals(BuiltInRegistries.ITEM.getKey(item))) {
@@ -60,9 +68,10 @@ public final class ReplaceService {
             fail(player, "message.quickhatch.not_replaceable");
             return;
         }
-        // 扣 1 个仓室（物品栏 → 背包类容器 → 无线终端所在 ME 网络）；
-        // 先跳过手上那一格，手上没变就不会出现"换物/挥手"动画
-        if (PullService.findAndExtract(player, item, 1, true) <= 0) {
+        // 生存模式：扣 1 个仓室（物品栏 → 背包类容器 → 无线终端所在 ME 网络）；
+        // 先跳过手上那一格，手上没变就不会出现"换物/挥手"动画。
+        // 创造模式：不消耗任何物品（用户要求），没有仓室也能换。
+        if (!creative && PullService.findAndExtract(player, item, 1, true) <= 0) {
             fail(player, "message.quickhatch.no_item");
             return;
         }
@@ -74,9 +83,10 @@ public final class ReplaceService {
             newState = newState.setValue(BlockStateProperties.FACING, player.getDirection().getOpposite());
         }
         level.setBlock(pos, newState, Block.UPDATE_ALL);
-        // 被破坏的方块直接还给身上（**不碰手上那一格**，见 giveBack）
+        // 被破坏的方块直接还给身上（**不碰手上那一格**，见 giveBack）；
+        // 创造模式不给（原版创造模式破坏方块也不会掉落）
         ItemStack oldStack = new ItemStack(oldState.getBlock());
-        if (!oldStack.isEmpty()) {
+        if (!creative && !oldStack.isEmpty()) {
             giveBack(player, oldStack);
         }
         SoundType sound = newState.getSoundType(level, pos, null);

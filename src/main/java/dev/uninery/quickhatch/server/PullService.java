@@ -30,6 +30,14 @@ public final class PullService {
     private PullService() {}
 
     public static void handle(ServerboundPullItemPacket msg, ServerPlayer player) {
+        handle(msg, player, player != null && player.isCreative());
+    }
+
+    /**
+     * @param creative 是否创造模式。单独当参数传是为了让自检能直接跑创造那条分支
+     *                 （{@code FakePlayer#isCreative()} 返回什么并不可靠）。
+     */
+    static void handle(ServerboundPullItemPacket msg, ServerPlayer player, boolean creative) {
         if (player == null) return;
         Item item = BuiltInRegistries.ITEM.get(msg.item());
         if (item == Items.AIR || !msg.item().equals(BuiltInRegistries.ITEM.getKey(item))) {
@@ -37,9 +45,9 @@ public final class PullService {
             return;
         }
         if (msg.preferHotbar()) {
-            handlePullHotbar(msg, item, player);
+            handlePullHotbar(msg, item, player, creative);
         } else {
-            handlePullNoReplace(msg, item, player);
+            handlePullNoReplace(msg, item, player, creative);
         }
     }
 
@@ -60,7 +68,8 @@ public final class PullService {
      *       同样只抽放得下的数量。没有任何空位时不抽、直接提示，绝不吞物品。</li>
      * </ol>
      */
-    private static void handlePullHotbar(ServerboundPullItemPacket msg, Item item, ServerPlayer player) {
+    private static void handlePullHotbar(ServerboundPullItemPacket msg, Item item, ServerPlayer player,
+                                         boolean creative) {
         Inventory inv = player.getInventory();
         int want = clampCount(msg.stackSize(), item);
         ItemStack probe = new ItemStack(item);
@@ -69,7 +78,7 @@ public final class PullService {
         int existing = findSameItemSlot(inv, probe);
         if (existing >= 0) {
             int space = inv.getItem(existing).getMaxStackSize() - inv.getItem(existing).getCount();
-            int moved = space > 0 ? findAndExtract(player, item, Math.min(want, space)) : 0;
+            int moved = space > 0 ? obtain(player, item, Math.min(want, space), creative) : 0;
             if (moved > 0) {
                 // 注意：抽取过程会 shrink/setItem，早先抓到的 ItemStack 引用可能已经被换掉，
                 // 所以这里**重新取一次**再写回，否则抽出来的物品会凭空消失（吞物品 bug）。
@@ -96,7 +105,7 @@ public final class PullService {
         int space = targetStack.isEmpty()
                 ? probe.getMaxStackSize()
                 : targetStack.getMaxStackSize() - targetStack.getCount();
-        int extracted = findAndExtract(player, item, Math.min(want, space));
+        int extracted = obtain(player, item, Math.min(want, space), creative);
         if (extracted <= 0) {
             fail(player, "message.quickhatch.no_item");
             return;
@@ -107,6 +116,21 @@ public final class PullService {
         }
         inv.setChanged();
         QuickHatchNetwork.sendToPlayer(new ClientboundActionResultPacket(true, inv.selected, ""), player);
+    }
+
+    /**
+     * 拿到最多 {@code amount} 个物品。
+     *
+     * <p><b>创造模式</b>：直接凭空生成（和原版创造模式对方块中键取物一样，不动网络、不消耗任何东西），
+     * 所以"网络里没有这个物品"也能拉出来。生存模式：照 {@link #findAndExtract} 的
+     * 物品栏 → 背包 → ME 网络顺序真的去取。</p>
+     */
+    private static int obtain(ServerPlayer player, Item item, int amount, boolean creative) {
+        if (amount <= 0) return 0;
+        if (creative) {
+            return Math.min(amount, Math.max(1, new ItemStack(item).getMaxStackSize()));
+        }
+        return findAndExtract(player, item, amount);
     }
 
     /** 身上第一格同种物品（物品 + NBT 一致）：快捷栏 0..8 优先，再背包其余格；没有返回 -1。 */
@@ -169,9 +193,10 @@ public final class PullService {
      * 拉取 {@code msg.stackSize()} 个且不改动已有物品栈：
      * 先补快捷栏/背包里的同类物品栈，再找空位；都不行就掉落。
      */
-    private static void handlePullNoReplace(ServerboundPullItemPacket msg, Item item, ServerPlayer player) {
+    private static void handlePullNoReplace(ServerboundPullItemPacket msg, Item item, ServerPlayer player,
+                                            boolean creative) {
         int want = clampCount(msg.stackSize(), item);
-        int extracted = findAndExtract(player, item, want);
+        int extracted = obtain(player, item, want, creative);
         if (extracted <= 0) {
             fail(player, "message.quickhatch.no_item");
             return;

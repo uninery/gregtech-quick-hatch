@@ -58,15 +58,14 @@ public class HatchSelectScreen extends Screen {
     private Integer tierFilter;
     private Integer ampFilter;
     private HatchIndex.IoRole ioFilter;
-    private HatchIndex.EnergyType energyFilter;
-    private HatchIndex.AeSubtype aeFilter;
+    /** 当前生效的子筛选（能量仓 有线/无线/电网、总线 普通/通行/巨型/留存、流体仓 普通/通行/巨型/四重/九重、AE 方块/线缆）。 */
+    private HatchIndex.SubOption subFilter;
     private String search = "";
 
     private EditBox searchBox;
     private int scrollRows;
     private final int[] colScroll = new int[COL_COUNT];
     private List<HatchIndex.Entry> visible;
-    private List<Integer> tiers;
     private List<Integer> amperages;
     private List<HatchIndex.IoRole> ioRoles;
 
@@ -83,8 +82,7 @@ public class HatchSelectScreen extends Screen {
 
     /** 手动筛选状态（供"退出时是否保留手动筛选"开关保存/恢复）。 */
     private record FilterState(HatchIndex.Category category, Integer tier, Integer amp,
-                               HatchIndex.IoRole io, HatchIndex.EnergyType energy,
-                               HatchIndex.AeSubtype ae, String search) {}
+                               HatchIndex.IoRole io, HatchIndex.SubOption sub, String search) {}
 
     /** 退出界面时是否保留手动筛选（整个游戏会话内记住）。默认关闭 = 每次全新筛选。 */
     private static boolean keepFilters = false;
@@ -143,8 +141,7 @@ public class HatchSelectScreen extends Screen {
         tierFilter = null;
         ampFilter = null;
         ioFilter = null;
-        energyFilter = null;
-        aeFilter = null;
+        subFilter = null;
         search = "";
         FilterState restored = keepFilters ? lastFilters : null;
         if (restored != null) {
@@ -152,13 +149,11 @@ public class HatchSelectScreen extends Screen {
             tierFilter = restored.tier();
             ampFilter = restored.amp();
             ioFilter = restored.io();
-            energyFilter = restored.energy();
-            aeFilter = restored.ae();
+            subFilter = restored.sub();
             search = restored.search() == null ? "" : restored.search();
             searchBox.setValue(search);
         }
 
-        tiers = HatchIndex.tiers();
         amperages = HatchIndex.amperages();
         ioRoles = HatchIndex.ioRoles();
         visible = null;
@@ -173,10 +168,7 @@ public class HatchSelectScreen extends Screen {
                 if (tierFilter != null && e.tier() != tierFilter) continue;
                 if (ampFilter != null && e.amperage() != ampFilter) continue;
                 if (ioFilter != null && e.io() != ioFilter) continue;
-                if (energyFilter != null && e.category() == HatchIndex.Category.ENERGY_HATCH
-                        && e.energyType() != energyFilter) continue;
-                if (aeFilter != null && e.category() == HatchIndex.Category.AE
-                        && e.aeSubtype() != aeFilter) continue;
+                if (subFilter != null && !subFilter.matches(e)) continue;
                 if (!search.isEmpty() && !e.searchText().contains(search)) continue;
                 out.add(e);
             }
@@ -205,9 +197,9 @@ public class HatchSelectScreen extends Screen {
         // 输入输出横排（标题右边）
         renderIoRow(gfx, mouseX, mouseY);
 
-        // 子筛选行（能量仓 / AE）
+        // 子筛选行（能量仓 / 总线 / 流体仓 / AE，各自一组）
         subChips.clear();
-        if (energySubRowActive() || aeSubRowActive()) {
+        if (subRowActive()) {
             renderSubRow(gfx, mouseX, mouseY);
         }
 
@@ -240,7 +232,7 @@ public class HatchSelectScreen extends Screen {
     /** 记录当前手动筛选（关闭界面时调用）。 */
     private void rememberFilters() {
         lastFilters = new FilterState(activeCategory, tierFilter, ampFilter,
-                ioFilter, energyFilter, aeFilter, search);
+                ioFilter, subFilter, search);
     }
 
     @Override
@@ -297,57 +289,30 @@ public class HatchSelectScreen extends Screen {
         }
     }
 
-    private boolean energySubRowActive() {
-        return activeCategory == HatchIndex.Category.ENERGY_HATCH;
-    }
-
-    private boolean aeSubRowActive() {
-        return activeCategory == HatchIndex.Category.AE;
+    /** 当前分类有没有子筛选行（能量仓/总线/流体仓/AE 都有自己的一组）。 */
+    private boolean subRowActive() {
+        return !HatchIndex.subOptionsOf(activeCategory).isEmpty();
     }
 
     private void renderSubRow(GuiGraphics gfx, int mx, int my) {
         int y = winY + 22;
         int x = gridX;
         final int w = 46;
-        List<Object> options = new ArrayList<>();
-        if (energySubRowActive()) {
-            options.add(HatchIndex.EnergyType.WIRELESS);
-            options.add(HatchIndex.EnergyType.WIRED);
-            if (HatchIndex.hasAdvNetEnergy()) {
-                options.add(HatchIndex.EnergyType.ADV_NET);
-            }
-        } else {
-            // 面板全归方块：AE 子筛选只有 方块 / 线缆
-            options.add(HatchIndex.AeSubtype.BLOCK);
-            options.add(HatchIndex.AeSubtype.CABLE);
-        }
-        for (Object option : options) {
-            final Object value = option;
-            boolean active = isSubActive(value);
+        for (HatchIndex.SubOption option : HatchIndex.subOptionsOf(activeCategory)) {
+            if (!option.available()) continue;
+            boolean active = subFilter == option;
             boolean hover = mx >= x && mx < x + w && my >= y && my < y + CHIP_H;
             gfx.fill(x, y, x + w, y + CHIP_H, active ? 0xFF3D6E96 : (hover ? 0xFF2A2E36 : 0xFF20242C));
-            gfx.drawString(this.font, subLabel(value), x + 3, y + 1,
+            gfx.drawString(this.font, option.label(), x + 3, y + 1,
                     active ? 0xFFFFFFFF : 0xFFB8BCC4, false);
+            final HatchIndex.SubOption value = option;
             subChips.add(new Chip(x, y, w, CHIP_H, () -> toggleSub(value)));
             x += w + 4;
         }
     }
 
-    private boolean isSubActive(Object value) {
-        return value instanceof HatchIndex.EnergyType e ? energyFilter == e : aeFilter == (HatchIndex.AeSubtype) value;
-    }
-
-    private Component subLabel(Object value) {
-        return value instanceof HatchIndex.EnergyType e ? e.label() : ((HatchIndex.AeSubtype) value).label();
-    }
-
-    private void toggleSub(Object value) {
-        if (value instanceof HatchIndex.EnergyType e) {
-            energyFilter = energyFilter == e ? null : e;
-        } else {
-            HatchIndex.AeSubtype a = (HatchIndex.AeSubtype) value;
-            aeFilter = aeFilter == a ? null : a;
-        }
+    private void toggleSub(HatchIndex.SubOption value) {
+        subFilter = subFilter == value ? null : value;
         invalidate();
     }
 
@@ -387,7 +352,8 @@ public class HatchSelectScreen extends Screen {
     private List<?> chipsOf(int col) {
         return switch (col) {
             case 0 -> List.of(HatchIndex.Category.values());
-            case 1 -> tiers;
+            // 电压列每次现算：索引里有蒸汽档（-2）就一定会出现，不会因为缓存/时机漏掉
+            case 1 -> HatchIndex.tiers();
             default -> amperages;
         };
     }
@@ -649,8 +615,8 @@ public class HatchSelectScreen extends Screen {
         switch (col) {
             case 0 -> {
                 activeCategory = (HatchIndex.Category) chip;
-                energyFilter = null;
-                aeFilter = null;
+                // 换分类 = 换了一组子筛选，清掉旧的
+                subFilter = null;
             }
             case 1 -> tierFilter = (Integer) chip;
             default -> ampFilter = (Integer) chip;
@@ -667,8 +633,7 @@ public class HatchSelectScreen extends Screen {
         tierFilter = null;
         ampFilter = null;
         ioFilter = null;
-        energyFilter = null;
-        aeFilter = null;
+        subFilter = null;
         search = "";
         if (searchBox != null) {
             searchBox.setValue("");
@@ -680,8 +645,7 @@ public class HatchSelectScreen extends Screen {
         switch (col) {
             case 0 -> {
                 activeCategory = null;
-                energyFilter = null;
-                aeFilter = null;
+                subFilter = null;
             }
             case 1 -> tierFilter = null;
             default -> ampFilter = null;
