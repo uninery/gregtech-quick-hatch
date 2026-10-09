@@ -308,13 +308,19 @@ public final class MultiblockRegistry {
     // 电压文字颜色（照抄 GTM 自己的设定，不要自己编颜色）
     // ------------------------------------------------------------------ //
 
-    /** 电压等级对应的 GT 文本颜色（{@code GTValues.VC}）。 */
+    /** 电压等级对应的 GT 文本颜色（{@code GTValues.VC}）；"蒸汽"档用 GT 自己的蒸汽色。 */
     public static TextColor tierTextColor(int tier) {
+        if (tier == HatchIndex.TIER_STEAM) {
+            return TextColor.fromRgb(STEAM_COLOR & 0xFFFFFF);
+        }
         if (tier >= 0 && tier < GTValues.VC.length) {
             return TextColor.fromRgb(GTValues.VC[tier] & 0xFFFFFF);
         }
         return TextColor.fromRgb(0xFFFFFF);
     }
+
+    /** GT 自己的蒸汽机器主色（{@code GTValues.VC_LP_STEAM}）。 */
+    private static final int STEAM_COLOR = 0xBB8E53;
     /**
      * {@code GTValues.VC} 每一档对应的原版颜色码。
      *
@@ -346,13 +352,21 @@ public final class MultiblockRegistry {
      * OpV/MAX 额外带粗体码。
      */
     public static String tierColoredText(int tier) {
+        if (tier == HatchIndex.TIER_STEAM) {
+            // 蒸汽档没有 GT 电压名，用自己的名字 + GT 蒸汽色最接近的原版色码
+            return "\u00a7" + ChatFormatting.GOLD.getChar() + "蒸汽";
+        }
         if (tier < 0 || tier >= GTValues.VN.length || tier >= TIER_FORMATTING.length) return "?";
         String bold = tierIsBold(tier) ? "\u00a7l" : "";
         return "\u00a7" + TIER_FORMATTING[tier].getChar() + bold + GTValues.VN[tier];
     }
 
-    /** 电压 chip 组件（style 颜色也设上，给 tooltip 等富文本路径用）。 */
+    /** 电压 chip 组件（style 颜色也设上，给 tooltip 等富文本路径用）。蒸汽档显示"蒸汽"。 */
     public static Component tierChip(int tier) {
+        if (tier == HatchIndex.TIER_STEAM) {
+            return Component.translatable("quickhatch.tier.steam")
+                    .withStyle(Style.EMPTY.withColor(tierTextColor(tier)));
+        }
         if (tier < 0 || tier >= GTValues.VN.length) {
             return Component.literal("?").withStyle(ChatFormatting.WHITE);
         }

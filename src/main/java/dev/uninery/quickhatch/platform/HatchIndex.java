@@ -38,8 +38,26 @@ import java.util.regex.Pattern;
  */
 public final class HatchIndex {
 
+    /**
+     * 第二列"子筛选行"的一个选项。每个分类各有自己的一组：
+     * 能量仓 = 有线/无线/电网；总线 = 普通/通行/巨型/留存；
+     * 流体仓 = 普通/通行/巨型/四重/九重；AE = 方块/线缆。
+     */
+    public interface SubOption {
+
+        Component label();
+
+        /** 界面上是否显示这一项（例如没装 AH 电网相关模组就不显示"电网"）。 */
+        default boolean available() {
+            return true;
+        }
+
+        /** 这一项是否包含该记录（实现里自己判分类）。 */
+        boolean matches(Entry entry);
+    }
+
     /** 能源仓子类。 */
-    public enum EnergyType {
+    public enum EnergyType implements SubOption {
         WIRED("wired"), WIRELESS("wireless"), ADV_NET("adv_net"), NONE("none");
 
         public final String key;
@@ -51,6 +69,104 @@ public final class HatchIndex {
         public Component label() {
             return Component.translatable("quickhatch.energy." + key);
         }
+
+        @Override
+        public boolean available() {
+            return this != ADV_NET || hasAdvNetEnergy();
+        }
+
+        @Override
+        public boolean matches(Entry entry) {
+            return entry.category() == Category.ENERGY_HATCH && entry.energyType() == this;
+        }
+    }
+
+    /**
+     * 总线的子分类（用户第二十三轮）：<b>普通 / 通行 / 巨型 / 留存</b>。
+     *
+     * <ul>
+     *   <li>普通：输入/输出总线（含蒸汽总线）；</li>
+     *   <li>通行：物品通行仓（{@code *_item_passthrough_hatch}）；</li>
+     *   <li>巨型：id 带 {@code huge} 的总线（GTM Things 的巨型输入/输出总线）；</li>
+     *   <li>留存：id 带 {@code lock} 的总线（GTMAdvancedHatch 的留存输出总线）。</li>
+     * </ul>
+     */
+    public enum BusSub implements SubOption {
+        PLAIN("plain"), PASSTHROUGH("passthrough"), HUGE("huge"), LOCK("lock");
+
+        public final String key;
+
+        BusSub(String key) {
+            this.key = key;
+        }
+
+        public Component label() {
+            return Component.translatable("quickhatch.sub." + key);
+        }
+
+        @Override
+        public boolean matches(Entry entry) {
+            if (entry.category() != Category.BUS) return false;
+            String path = entry.id().getPath();
+            return switch (this) {
+                case PASSTHROUGH -> isItemPassthroughHatch(path);
+                case HUGE -> path.contains("huge");
+                case LOCK -> path.contains("lock");
+                case PLAIN -> !isItemPassthroughHatch(path) && !path.contains("huge") && !path.contains("lock");
+            };
+        }
+    }
+
+    /**
+     * 流体仓的子分类（用户第二十三轮）：<b>普通 / 通行 / 巨型 / 四重 / 九重</b>。
+     *
+     * <ul>
+     *   <li>普通：{@code lv_input_hatch} 这类；</li>
+     *   <li>通行：流体通行仓（{@code *_fluid_passthrough_hatch}）；</li>
+     *   <li>巨型：{@code *_huge_input_hatch} / {@code *_huge_output_hatch}；</li>
+     *   <li>四重：{@code *_input_hatch_4x} 这类多重流体仓；</li>
+     *   <li>九重：{@code *_input_hatch_9x}。</li>
+     * </ul>
+     */
+    public enum FluidSub implements SubOption {
+        PLAIN("plain"), PASSTHROUGH("passthrough"), HUGE("huge"), QUAD("quad"), NINE("nine");
+
+        public final String key;
+
+        FluidSub(String key) {
+            this.key = key;
+        }
+
+        public Component label() {
+            return Component.translatable("quickhatch.sub." + key);
+        }
+
+        @Override
+        public boolean matches(Entry entry) {
+            if (entry.category() != Category.FLUID_HATCH) return false;
+            String path = entry.id().getPath();
+            return switch (this) {
+                case PASSTHROUGH -> isFluidPassthroughHatch(path);
+                case HUGE -> path.contains("huge");
+                case QUAD -> path.contains("_4x");
+                case NINE -> path.contains("_9x");
+                case PLAIN -> !isFluidPassthroughHatch(path) && !path.contains("huge")
+                        && !path.contains("_4x") && !path.contains("_9x");
+            };
+        }
+    }
+
+    /** 某个分类的子筛选选项（没有子分类的分类返回空列表）。 */
+    public static List<SubOption> subOptionsOf(Category category) {
+        if (category == null) return List.of();
+        return switch (category) {
+            case ENERGY_HATCH -> List.of(EnergyType.WIRELESS, EnergyType.WIRED, EnergyType.ADV_NET);
+            case BUS -> List.of(BusSub.PLAIN, BusSub.PASSTHROUGH, BusSub.HUGE, BusSub.LOCK);
+            case FLUID_HATCH -> List.of(FluidSub.PLAIN, FluidSub.PASSTHROUGH, FluidSub.HUGE,
+                    FluidSub.QUAD, FluidSub.NINE);
+            case AE -> List.of(AeSubtype.BLOCK, AeSubtype.CABLE);
+            default -> List.of();
+        };
     }
 
     /**
@@ -80,7 +196,7 @@ public final class HatchIndex {
      * "面板全放方块里去"，不要再拆出"面板"这一档）；"线缆" = 注册 id 以
      * {@code cable} 结尾的线缆部件与石英纤维。</p>
      */
-    public enum AeSubtype {
+    public enum AeSubtype implements SubOption {
         BLOCK("block"), CABLE("cable"), NONE("none");
 
         public final String key;
@@ -91,6 +207,11 @@ public final class HatchIndex {
 
         public Component label() {
             return Component.translatable("quickhatch.ae." + key);
+        }
+
+        @Override
+        public boolean matches(Entry entry) {
+            return entry.category() == Category.AE && entry.aeSubtype() == this;
         }
     }
 
@@ -116,10 +237,13 @@ public final class HatchIndex {
         ROTOR("rotor"),
         PARALLEL_HATCH("parallel_hatch"),
         ME("me"),
-        STEAM("steam"),
         CABLE("cable"),
         PIPE("pipe"),
-        AE("ae");
+        AE("ae"),
+        /** 中子加速器（中子活化器的仓室：{@code *_neutron_accelerator}）。 */
+        NEUTRON_ACCELERATOR("neutron_accelerator"),
+        /** 其他：方块总线 / 嬗变总线 / 物料谱解析仓 / 万象转录节点 / 中子传感器 这类杂项。 */
+        MISC("misc");
 
         public final String key;
 
@@ -130,6 +254,73 @@ public final class HatchIndex {
         public Component label() {
             return Component.translatable("quickhatch.category." + key);
         }
+    }
+
+    /**
+     * "蒸汽"不是电压等级，是排在最前面的一个伪电压档。
+     *
+     * <p>用户要求：<b>取消原来的"蒸汽"分类</b>，改成电压列最前面的一档"蒸汽"，
+     * 蒸汽输入/输出仓（大型 / 特大 / 巨型）都归到<b>能量仓</b>分类里。</p>
+     */
+    public static final int TIER_STEAM = -2;
+
+    /** 蒸汽<b>仓</b>判据（{@code *_hatch}）：归"能量仓"分类。 */
+    static boolean isSteamEnergyHatch(String path) {
+        return path.contains("steam") && path.endsWith("_hatch");
+    }
+
+    /**
+     * 蒸汽相关的仓室/总线（{@code *_hatch} / {@code *_bus}）：<b>电压档一律用"蒸汽"</b>。
+     *
+     * <p>蒸汽仓归"能量仓"、蒸汽总线归"总线"，但两者的"电压"都是蒸汽 ——
+     * 所以电压列那档"蒸汽"能把它们都筛出来（用户第二十二轮：蒸汽筛选要有效）。</p>
+     */
+    static boolean isSteamPart(String path) {
+        return path.contains("steam") && (path.endsWith("_hatch") || path.endsWith("_bus"));
+    }
+
+    /** 通行仓：物品通行仓 = 总线，流体通行仓 = 流体仓（用户第二十二轮）。 */
+    static boolean isItemPassthroughHatch(String path) {
+        return path.contains("item_passthrough_hatch");
+    }
+
+    static boolean isFluidPassthroughHatch(String path) {
+        return path.contains("fluid_passthrough_hatch");
+    }
+
+    /**
+     * "其他"分类的 id 表（命名空间 + 路径）。
+     *
+     * <p>名字本身像仓/总线的（以 {@code _hatch} / {@code _bus} 结尾，例如焦炉仓
+     * {@code coke_oven_hatch}、物料谱解析仓）会被 {@code categorizeMachine} 末尾的兜底规则
+     * 自动收进"其他"；这张表是给那些<b>名字看不出来</b>的方块用的
+     * （嬗变总线的 id 以 {@code me_} 开头，本来会被算成"ME 仓"；中子传感器压根没有 hatch/bus 后缀）。</p>
+     *
+     * <ul>
+     *   <li>{@code gtceu:coke_oven_hatch} 焦炉仓</li>
+     *   <li>{@code gtceu:block_bus} 方块总线</li>
+     *   <li>{@code gtceu:neutron_sensor} 中子传感器</li>
+     *   <li>{@code gtladditions:me_block_conservation} 嬗变总线</li>
+     *   <li>{@code gtladditions:spectral_analysis_hatch} 物料谱解析仓</li>
+     *   <li>{@code gtladditions:vientiane_transcription_node} 万象转录节点</li>
+     * </ul>
+     */
+    private static final Set<String> MISC_IDS = new java.util.LinkedHashSet<>(List.of(
+            "gtceu:coke_oven_hatch",
+            "gtceu:block_bus",
+            "gtceu:neutron_sensor",
+            "gtladditions:me_block_conservation",
+            "gtladditions:spectral_analysis_hatch",
+            "gtladditions:vientiane_transcription_node"));
+
+    /**
+     * 这个分类里的东西是不是"仓室"（能装进多方块、可以被替换成别的仓室）。
+     *
+     * <p>线缆 / 管道 / AE 方块<b>不是</b>仓室：它们虽然也列在界面里（方便拉取），
+     * 但对着电线按替换键是不该有反应的。</p>
+     */
+    public static boolean isHatchCategory(Category category) {
+        return category != Category.CABLE && category != Category.PIPE && category != Category.AE;
     }
 
     /**
@@ -185,10 +376,11 @@ public final class HatchIndex {
     private static volatile Set<Block> replaceableHatchBlocks;
 
     /**
-     * "已放置的仓室"里允许被替换的方块种类 = 索引里的方块物品 − 能放样板的那些。
+     * "已放置的仓室"里允许被替换的方块种类 = 仓室类目里的方块物品 − 能放样板的那些。
      *
-     * <p>{@link MultiblockRegistry#isReplaceable} 用它把"已放置的仓室"也算成可替换目标：
-     * 于是 Ctrl+左键点一个已经放好的输入总线 / 流体仓，也能换成别的仓室。</p>
+     * <p><b>只有仓室</b>：线缆、管道、AE 方块（{@link #isHatchCategory} 判为 false）不在内 ——
+     * 用户明确要求"不是所有被记录到界面里的方块都能触发替换，只有能被替换为仓室的方块和所有仓室"，
+     * 否则对着电线也会弹替换界面。</p>
      */
     public static Set<Block> replaceableHatchBlocks() {
         Set<Block> local = replaceableHatchBlocks;
@@ -197,6 +389,7 @@ public final class HatchIndex {
                 if (replaceableHatchBlocks == null) {
                     Set<Block> out = new HashSet<>();
                     for (Entry e : get()) {
+                        if (!isHatchCategory(e.category())) continue;
                         if (holdsPatterns(e.id())) continue;
                         if (e.item() instanceof net.minecraft.world.item.BlockItem blockItem) {
                             out.add(blockItem.getBlock());
@@ -210,15 +403,19 @@ public final class HatchIndex {
         return local;
     }
 
-    /** 索引中实际存在的电压等级（升序）。 */
+    /** 索引中实际存在的电压等级（升序）；蒸汽档（{@link #TIER_STEAM}）有的话排在最前面。 */
     public static List<Integer> tiers() {
         boolean[] present = new boolean[GTValues.TIER_COUNT];
+        boolean steam = false;
         for (Entry e : get()) {
-            if (e.tier() >= 0 && e.tier() < GTValues.TIER_COUNT) {
+            if (e.tier() == TIER_STEAM) {
+                steam = true;
+            } else if (e.tier() >= 0 && e.tier() < GTValues.TIER_COUNT) {
                 present[e.tier()] = true;
             }
         }
         List<Integer> out = new ArrayList<>();
+        if (steam) out.add(TIER_STEAM);
         for (int t = 0; t < GTValues.TIER_COUNT; t++) {
             if (present[t]) out.add(t);
         }
@@ -268,7 +465,7 @@ public final class HatchIndex {
             MetaMachineItem item = def.getItem();
             if (item == null) continue;
             String path = e.getKey().getPath();
-            Category category = categorizeMachine(path);
+            Category category = categorizeMachine(e.getKey());
             if (category == null) continue;
             int amperage = -1;
             EnergyType energyType = EnergyType.NONE;
@@ -278,7 +475,9 @@ public final class HatchIndex {
             } else if (category == Category.CABLE) {
                 amperage = amperageOf(path);
             }
-            out.add(new Entry(e.getKey(), category, def.getTier(), amperage, energyType,
+            // 蒸汽仓（大型/特大/巨型蒸汽输入输出仓）不按 GT 电压档走，单独一档"蒸汽"
+            int tier = tierOf(category, path, def.getTier());
+            out.add(new Entry(e.getKey(), category, tier, amperage, energyType,
                     ioRoleOf(path, category), AeSubtype.NONE, item, searchText(item, e.getKey())));
         }
 
@@ -310,6 +509,21 @@ public final class HatchIndex {
             out.add(new Entry(id, Category.AE, -1, -1, EnergyType.NONE, IoRole.NONE,
                     subtype, item, searchText(item, id)));
         });
+
+        // 4) "其他"分类的兜底：表里的方块不一定登记在 GTM 机器注册表里（可能是普通方块），
+        //    已经进过列表的跳过，其余按 id 直接补上
+        Set<ResourceLocation> seen = new HashSet<>();
+        for (Entry e : out) {
+            seen.add(e.id());
+        }
+        for (String miscId : MISC_IDS) {
+            ResourceLocation id = ResourceLocation.tryParse(miscId);
+            if (id == null || seen.contains(id)) continue;
+            Item item = BuiltInRegistries.ITEM.get(id);
+            if (item == null || item == net.minecraft.world.item.Items.AIR) continue;
+            out.add(new Entry(id, Category.MISC, -1, -1, EnergyType.NONE, IoRole.NONE,
+                    AeSubtype.NONE, item, searchText(item, id)));
+        }
 
         out.sort((a, b) -> {
             int byCat = a.category().compareTo(b.category());
@@ -388,7 +602,41 @@ public final class HatchIndex {
         return categorizeMachine(path);
     }
 
+    /**
+     * 按"命名空间:路径"直接分类（自检用；不依赖方块是否真的装了，
+     * 所以能验证 {@code gtladditions:*} / GTLCore 的 {@code gtceu:block_bus} 这些规则）。
+     */
+    public static Category categorizeId(String namespacePath) {
+        return categorizeMachine(ResourceLocation.tryParse(namespacePath));
+    }
+
+    /**
+     * 一条记录最终用的电压档：蒸汽仓用"蒸汽"档，其他类的杂项没有电压档，
+     * 其余用机器定义自己的电压。（自检也会直接调它。）
+     */
+    public static int tierOf(Category category, String path, int definitionTier) {
+        if (isSteamPart(path)) return TIER_STEAM;
+        if (category == Category.MISC) return -1;
+        return definitionTier;
+    }
+
+    /** 只有路径时的分类（自检用）；命名空间相关的"其他"表照样能命中唯一路径。 */
     static Category categorizeMachine(String path) {
+        for (var e : GTRegistries.MACHINES.entries()) {
+            if (e.getKey().getPath().equals(path)) {
+                return categorizeMachine(e.getKey());
+            }
+        }
+        return categorizeMachine(ResourceLocation.tryParse("gtceu:" + path));
+    }
+
+    static Category categorizeMachine(ResourceLocation id) {
+        if (id == null) return null;
+        String path = id.getPath();
+        // "其他"必须最先判：嬗变总线的 id 是 me_block_conservation，按后面的 me_ 规则会被算成 ME 仓
+        if (MISC_IDS.contains(id.toString())) return Category.MISC;
+        // 中子加速器（中子活化器的仓室）：lv_neutron_accelerator … max_neutron_accelerator
+        if (path.endsWith("neutron_accelerator")) return Category.NEUTRON_ACCELERATOR;
         if (path.contains("maintenance")) return Category.MAINTENANCE;
         if (path.contains("muffler")) return Category.MUFFLER;
         if (path.contains("rotor")) return Category.ROTOR;
@@ -409,10 +657,6 @@ public final class HatchIndex {
             return path.contains("component") || path.contains("creative") ? null : Category.COMPUTATION;
         }
         if (path.contains("data") && path.endsWith("hatch")) return Category.DATA;
-        // 蒸汽仓室：只收蒸汽总线与蒸汽仓，排除蒸汽采矿机/蒸汽锅炉等单方块机器
-        if (path.startsWith("steam") && (path.endsWith("_bus") || path.contains("_hatch"))) {
-            return Category.STEAM;
-        }
         // ME 仓室：me_input_hatch / me_output_hatch / me_stocking_* / me_dual_hatch_* 等
         if (path.startsWith("me_")) return Category.ME;
         if (path.contains("dual") && path.contains("hatch")) return Category.DUAL_HATCH;
@@ -422,17 +666,56 @@ public final class HatchIndex {
         boolean energyHatch = path.contains("energy") || path.contains("net_energy")
                 || path.contains("net_laser") || (path.contains("laser") && path.endsWith("hatch"));
         if (energyHatch) return Category.ENERGY_HATCH;
-        if (path.endsWith("input_bus") || path.endsWith("output_bus")) return Category.BUS;
+        // 变电站仓（用户第二十三轮：变电能源仓/变电动力仓跑错到流体仓去了）：
+        // 它们 id 里没有 "energy"（ev_substation_input_hatch_64a），但确实是能量仓（带电流档）
+        if (path.contains("substation")) return Category.ENERGY_HATCH;
+        // 兜底：带电流档（_4a / _64a / _256a_）的"仓"都是能量仓 —— 多重流体仓是 _4x / _9x，不会命中
+        if (path.contains("hatch") && amperageOf(path) > 1) return Category.ENERGY_HATCH;
+        // 蒸汽<b>仓</b>（大型/特大/巨型蒸汽输入输出仓、蒸汽输入仓）：用户要求<b>取消"蒸汽"分类</b>，
+        // 这些仓归到能量仓里，电压档用"蒸汽"（见 TIER_STEAM）。
+        // 注意：蒸汽<b>总线</b>（steam_input_bus / steam_output_bus）不在这里 —— 它们要落到下面的
+        // input_bus/output_bus 规则，进"总线"分类并带输入输出角色（电压档仍是"蒸汽"）。
+        if (isSteamEnergyHatch(path)) return Category.ENERGY_HATCH;
+        // 通行仓：物品通行仓是"总线"，流体通行仓是"流体仓"（它们不是 input/output 命名，得单独判）
+        if (isItemPassthroughHatch(path)) return Category.BUS;
+        if (isFluidPassthroughHatch(path)) return Category.FLUID_HATCH;
+        // 总线：普通输入/输出总线 + 各种"导入/导出"命名的总线（巨型输入总线 huge_item_import_bus_lv 等）
+        if (path.endsWith("input_bus") || path.endsWith("output_bus")
+                || path.endsWith("import_bus") || path.endsWith("export_bus")
+                || path.contains("_import_bus_") || path.contains("_export_bus_")) {
+            return Category.BUS;
+        }
         // 流体仓（含<b>多重流体仓</b>）：lv_input_hatch / ev_input_hatch_4x / max_input_hatch_9x /
         // ev_substation_input_hatch_64a 之类都要收，所以用 contains 看 "input_hatch"，
-        // 不能只用 endsWith。
-        if (path.contains("input_hatch") || path.contains("output_hatch")) {
+        // 不能只用 endsWith。导入/导出命名的流体仓（*_huge_input_hatch 等）一并归这里。
+        if (path.contains("input_hatch") || path.contains("output_hatch")
+                || path.contains("import_hatch") || path.contains("export_hatch")) {
             return Category.FLUID_HATCH;
         }
+        // 收尾兜底：名字就像仓/总线的机器（焦炉仓 coke_oven_hatch、物料谱解析仓等）一律进"其他"，
+        // 免得以后 GTCEu / 附属模组新增的仓室又被漏掉
+        if (path.endsWith("_hatch") || path.endsWith("_bus")) return Category.MISC;
         return null;
     }
 
-    /** id 电流：_4a → 4、_256a_ → 256；无电流标记 → 1（普通仓室/线缆均为 1A 起）。 */
+    /**
+     * 输入输出角色（自检用；靶仓/源仓的判定规则见 {@link #ioRoleOf}）。
+     */
+    public static IoRole ioRoleOfPublic(String path, Category category) {
+        return ioRoleOf(path, category);
+    }
+
+    /** 电流档解析（自检用，见 {@link #amperageOf}）。 */
+    public static int amperageOfPublic(String path) {
+        return amperageOf(path);
+    }
+
+    /**
+     * id 电流：{@code _4a} → 4、{@code _256a_} → 256；无电流标记时：
+     * <b>GT 标准的"能源仓/动力仓"是 2A</b>（{@code GTMachines}：
+     * {@code new EnergyHatchPartMachine(holder, tier, IN, 2)}，每个电压档的基础仓都是 2A），
+     * <b>无线版是 1A</b>（GTM Things 的无线能源仓），其余无标记的按 1A。
+     */
     static int amperageOf(String path) {
         Matcher m = AMP_SUFFIX.matcher(path);
         if (m.find()) {
@@ -448,7 +731,19 @@ public final class HatchIndex {
             } catch (NumberFormatException ignored) {
             }
         }
+        if (isStandardTwoAmpEnergyHatch(path)) return 2;
         return 1;
+    }
+
+    /**
+     * 没带电流标记的"基础能源仓 / 动力仓"（{@code lv_energy_input_hatch} 这类）= GT 的 2A 仓。
+     *
+     * <p>无线能源仓（{@code wireless_energy_*_hatch}）与 AH 电网仓（{@code net_energy_*}）
+     * 不是 GT 这个 2A 模板，保持 1A。</p>
+     */
+    public static boolean isStandardTwoAmpEnergyHatch(String path) {
+        if (path.contains("wireless") || path.contains("net_")) return false;
+        return path.endsWith("energy_input_hatch") || path.endsWith("energy_output_hatch");
     }
 
     /** 能源仓子类：gtmthings=无线；net_energy/net_laser=AH 电网；其余=有线。 */
@@ -460,12 +755,14 @@ public final class HatchIndex {
 
     /**
      * 输入输出角色：源仓=输出、靶仓=输入。
-     * 靶仓/输入：target、*_input、transmitter；
-     * 源仓/输出：source、*_output、receiver。
+     * 靶仓/输入：target、*_input、transmitter、<b>import</b>（巨型输入总线之类）；
+     * 源仓/输出：source、*_output、receiver、<b>export</b>。
      */
     static IoRole ioRoleOf(String path, Category category) {
-        boolean input = path.contains("target") || path.contains("_input") || path.contains("transmitter");
-        boolean output = path.contains("source") || path.contains("_output") || path.contains("receiver");
+        boolean input = path.contains("target") || path.contains("_input") || path.contains("transmitter")
+                || path.contains("import");
+        boolean output = path.contains("source") || path.contains("_output") || path.contains("receiver")
+                || path.contains("export");
         if (input) return IoRole.INPUT;
         if (output) return IoRole.OUTPUT;
         return IoRole.NONE;

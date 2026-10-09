@@ -1,5 +1,6 @@
 package dev.uninery.quickhatch.client;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.uninery.quickhatch.client.screen.HatchSelectScreen;
 import dev.uninery.quickhatch.network.ClientboundActionResultPacket;
 import dev.uninery.quickhatch.network.ClientboundItemCountsPacket;
@@ -39,8 +40,8 @@ import java.util.Set;
  */
 public final class ClientEvents {
 
-    /** GLFW_LEFT 的边沿状态（Ctrl+左键必须自己轮询，见 onClientTick）。 */
-    private static boolean leftMouseWasDown = false;
+    /** "替换仓室"那个键上一次的按下状态（自己轮询输入，见 pollReplaceKey）。 */
+    private static boolean replaceKeyWasDown = false;
 
     private ClientEvents() {}
 
@@ -51,6 +52,7 @@ public final class ClientEvents {
 
     private static void onRegisterKeys(RegisterKeyMappingsEvent event) {
         event.register(KeyBindings.OPEN_SELECT);
+        event.register(KeyBindings.REPLACE_HATCH);
     }
 
     // ------------------------------------------------------------------ //
@@ -62,7 +64,7 @@ public final class ClientEvents {
         if (event.phase != TickEvent.Phase.END) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) {
-            leftMouseWasDown = false;
+            replaceKeyWasDown = false;
             return;
         }
         // G 键：界面上按 = 关闭；世界里按 = 打开仓室选择界面（<b>不要求</b>对准任何方块，
@@ -74,7 +76,7 @@ public final class ClientEvents {
                 openSelectScreen(null);
             }
         }
-        pollCtrlLeftClick(mc);
+        pollReplaceKey(mc);
     }
 
     /**
@@ -88,30 +90,37 @@ public final class ClientEvents {
     }
 
     /**
-     * Ctrl+左键必须自己轮询 GLFW。
+     * "替换仓室"那个键必须自己轮询输入。
      *
-     * <p>原因：原版会把"Ctrl（=冲刺键）+ 左键"当成疾跑，直接把
-     * {@code keyAttack} 的 down 状态吃掉，Forge 的
+     * <p>原因：默认绑定是<b>左键</b>，而原版会把"Ctrl（=冲刺键）+ 左键"当成疾跑，
+     * 直接把 {@code keyAttack} 的 down 状态吃掉，Forge 的
      * {@code InputEvent.InteractionKeyMappingTriggered}（isAttack）根本不会触发，
-     * 所以之前的 Ctrl+左键完全失效。</p>
+     * 所以这个组合只能靠 GLFW 轮询才收得到。</p>
+     *
+     * <p>键位可以在原版"按键设置"里改（默认鼠标左键）；<b>绑定是左键时要求同时按住 Ctrl</b>
+     * （否则会和攻击冲突），绑到别的键就不需要 Ctrl。</p>
      *
      * <p>命中"可替换方块"（多方块里能被换成仓室的方块，<b>或者本身就已是仓室</b>，
      * 样板总成之类能放样板的仓室除外）就打开替换模式界面。</p>
      */
-    private static void pollCtrlLeftClick(Minecraft mc) {
+    private static void pollReplaceKey(Minecraft mc) {
+        InputConstants.Key key = KeyBindings.REPLACE_HATCH.getKey();
+        boolean isLeftMouse = key.getType() == InputConstants.Type.MOUSE
+                && key.getValue() == GLFW.GLFW_MOUSE_BUTTON_LEFT;
         boolean down;
         try {
-            down = GLFW.glfwGetMouseButton(mc.getWindow().getWindow(), GLFW.GLFW_MOUSE_BUTTON_LEFT)
-                    == GLFW.GLFW_PRESS;
+            down = key.getType() == InputConstants.Type.MOUSE
+                    ? GLFW.glfwGetMouseButton(mc.getWindow().getWindow(), key.getValue()) == GLFW.GLFW_PRESS
+                    : InputConstants.isKeyDown(mc.getWindow().getWindow(), key.getValue());
         } catch (Throwable ex) {
             return;
         }
-        boolean rising = down && !leftMouseWasDown;
-        leftMouseWasDown = down;
+        boolean rising = down && !replaceKeyWasDown;
+        replaceKeyWasDown = down;
         if (!rising) return;
         if (mc.screen != null || mc.level == null || mc.player == null) return;
         if (!mc.mouseHandler.isMouseGrabbed()) return;
-        if (!net.minecraft.client.gui.screens.Screen.hasControlDown()) return;
+        if (isLeftMouse && !net.minecraft.client.gui.screens.Screen.hasControlDown()) return;
         if (!(mc.hitResult instanceof BlockHitResult bhr) || mc.hitResult.getType() != HitResult.Type.BLOCK) {
             return;
         }
@@ -122,7 +131,7 @@ public final class ClientEvents {
     }
 
     // ------------------------------------------------------------------ //
-    // 方块种类是否"能在某种多方块里被替换为仓室"（只看注册表 id）
+    // 方块种类是否"能被替换为仓室"
     // ------------------------------------------------------------------ //
 
     public static boolean isReplaceableAt(Minecraft mc, BlockPos pos) {

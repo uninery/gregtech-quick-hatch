@@ -2,6 +2,7 @@ package dev.uninery.quickhatch.server;
 
 import com.mojang.brigadier.CommandDispatcher;
 import dev.uninery.quickhatch.QuickHatch;
+import dev.uninery.quickhatch.platform.HatchIndex;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.BlockPos;
@@ -94,8 +95,350 @@ public final class QuickHatchDebug {
         logReplaceProbe(level);
         // 场景 3e：已放置仓室的替换 + 样板仓室黑名单 + 拉取不吞物品
         logPlacedHatchProbes(level);
+        // 场景 3f：分类改动（蒸汽档 / 中子加速器 / 其他）+ 创造模式行为
+        logCategoryProbes(level);
         // 场景 4：全局多方块索引自检（哪些方块种类可以被替换为仓室）
         logMultiblockIndex();
+    }
+
+    /**
+     * 分类改动自检：
+     * <ul>
+     *   <li>蒸汽：<b>没有</b> {@code STEAM} 分类；大型/特大/巨型蒸汽输入输出仓都在
+     *       <b>能量仓</b>分类 + <b>蒸汽</b>电压档；</li>
+     *   <li>中子加速器：{@code *_neutron_accelerator} 归 {@code NEUTRON_ACCELERATOR}；</li>
+     *   <li>其他：方块总线 / 中子传感器 / 嬗变总线 / 物料谱解析仓 / 万象转录节点
+     *       归 {@code MISC}（装了对应模组才有，缺的列出来）；</li>
+     *   <li>创造模式：拉取凭空生成、替换不消耗物品。</li>
+     * </ul>
+     */
+    public static void logCategoryProbes(ServerLevel level) {
+        // a) 蒸汽：不应再有 STEAM 分类；蒸汽仓（大型/特大/巨型）要在能量仓 + 蒸汽电压档
+        List<String> steamProblems = new ArrayList<>();
+        List<String> steamAbsent = new ArrayList<>();
+        for (String id : List.of("gtceu:large_steam_input_hatch", "gtceu:mega_steam_input_hatch",
+                "gtceu:mega_steam_output_hatch", "gtladditions:huge_steam_input_hatch")) {
+            if (itemOf(id) == null) {
+                steamAbsent.add(id);
+                continue;
+            }
+            HatchIndex.Entry e = entryOf(id);
+            if (e == null) {
+                steamProblems.add(id + "=missing");
+            } else if (e.category() != HatchIndex.Category.ENERGY_HATCH || e.tier() != HatchIndex.TIER_STEAM) {
+                steamProblems.add(id + "=" + e.category() + "/tier" + e.tier());
+            }
+        }
+        List<Integer> tiers = HatchIndex.tiers();
+        boolean steamFirst = !tiers.isEmpty() && tiers.get(0) == HatchIndex.TIER_STEAM;
+        List<String> steamTierIds = new ArrayList<>();
+        List<String> steamNotTiered = new ArrayList<>();
+        for (HatchIndex.Entry e : HatchIndex.get()) {
+            String path = e.id().getPath();
+            boolean steamish = path.contains("steam") && (path.endsWith("_hatch") || path.endsWith("_bus"));
+            if (e.tier() == HatchIndex.TIER_STEAM) steamTierIds.add(path);
+            // 完整性：索引里所有蒸汽仓/总线都必须在"蒸汽"档里 —— 否则电压列的"蒸汽"筛选就是漏的
+            if (steamish && e.tier() != HatchIndex.TIER_STEAM) {
+                steamNotTiered.add(e.id() + "=tier" + e.tier());
+            }
+        }
+        boolean noSteamCategory = !hasCategory("STEAM");
+        QuickHatch.LOGGER.info("[selftest] category/steam: problems={} absent={} steamTierFirst={} "
+                        + "steamCategoryRemoved={} steamTierEntries={} notTiered={} tiers={} -> {}",
+                steamProblems.isEmpty() ? "(none)" : steamProblems, steamAbsent, steamFirst, noSteamCategory,
+                steamTierIds, steamNotTiered.isEmpty() ? "(none)" : steamNotTiered,
+                tiers.subList(0, Math.min(4, tiers.size())),
+                (steamProblems.isEmpty() && noSteamCategory && steamNotTiered.isEmpty()
+                        && (steamFirst || steamAbsent.size() == 4)) ? "PASS" : "FAIL");
+
+        // b) 中子加速器：注册表里所有 *_neutron_accelerator 都该归 NEUTRON_ACCELERATOR
+        List<String> neutronWrong = new ArrayList<>();
+        int neutron = 0;
+        for (Item item : BuiltInRegistries.ITEM) {
+            ResourceLocation id = BuiltInRegistries.ITEM.getKey(item);
+            if (!id.getPath().endsWith("neutron_accelerator")) continue;
+            neutron++;
+            HatchIndex.Entry e = entryOf(id.toString());
+            if (e == null || e.category() != HatchIndex.Category.NEUTRON_ACCELERATOR) {
+                neutronWrong.add(id + "=" + (e == null ? "missing" : e.category()));
+            }
+        }
+        QuickHatch.LOGGER.info("[selftest] category/neutron-accelerator: found={} wrong={} -> {}",
+                neutron, neutronWrong.isEmpty() ? "(none)" : neutronWrong,
+                neutronWrong.isEmpty() ? "PASS" : "FAIL");
+
+        // c) 其他：表里"本分支装了"的那些必须都在 MISC 分类里（没装的列出来）
+        List<String> miscWrong = new ArrayList<>();
+        List<String> miscAbsent = new ArrayList<>();
+        List<String> miscOk = new ArrayList<>();
+        for (String id : List.of("gtceu:block_bus", "gtceu:neutron_sensor",
+                "gtladditions:me_block_conservation", "gtladditions:spectral_analysis_hatch",
+                "gtladditions:vientiane_transcription_node")) {
+            if (itemOf(id) == null) {
+                miscAbsent.add(id);
+                continue;
+            }
+            HatchIndex.Entry e = entryOf(id);
+            if (e == null || e.category() != HatchIndex.Category.MISC) {
+                miscWrong.add(id + "=" + (e == null ? "missing" : e.category()));
+            } else {
+                miscOk.add(id);
+            }
+        }
+        QuickHatch.LOGGER.info("[selftest] category/misc: ok={} wrong={} not-installed={} -> {}",
+                miscOk, miscWrong.isEmpty() ? "(none)" : miscWrong, miscAbsent,
+                miscWrong.isEmpty() ? "PASS" : "FAIL");
+
+        logClassifyRules();
+        logSubFilterProbes();
+        logReplaceBoundary();
+        logCreativeProbes(level);
+    }
+
+    /**
+     * 子筛选自检（用户第二十三轮要求给总线/流体仓加子分类）：
+     * 每个分类的子选项必须<b>不重不漏</b>地覆盖该类目下的所有记录 ——
+     * 每条记录正好命中一个选项（"普通"负责兜住剩下的），
+     * 这样界面上随便点哪一档筛出来的东西都是对的。
+     */
+    private static void logSubFilterProbes() {
+        List<String> problems = new ArrayList<>();
+        StringBuilder summary = new StringBuilder();
+        for (HatchIndex.Category category : HatchIndex.Category.values()) {
+            List<HatchIndex.SubOption> options = HatchIndex.subOptionsOf(category);
+            if (options.isEmpty()) continue;
+            int[] hits = new int[options.size()];
+            for (HatchIndex.Entry e : HatchIndex.get()) {
+                if (e.category() != category) continue;
+                int matched = 0;
+                for (int i = 0; i < options.size(); i++) {
+                    if (options.get(i).available() && options.get(i).matches(e)) {
+                        matched++;
+                        hits[i]++;
+                    }
+                }
+                if (matched != 1) {
+                    problems.add(e.id() + "->" + matched + " 个子分类");
+                }
+            }
+            summary.append(category.key).append('=').append(java.util.Arrays.toString(hits)).append(' ');
+        }
+        // 分类规则自检里已经确认过：变电站仓不能落在流体仓里
+        List<String> fluidSuspicious = new ArrayList<>();
+        for (HatchIndex.Entry e : HatchIndex.get()) {
+            if (e.category() != HatchIndex.Category.FLUID_HATCH) continue;
+            String path = e.id().getPath();
+            if (path.contains("energy") || path.contains("substation") || path.contains("laser")
+                    || (path.contains("hatch") && HatchIndex.amperageOfPublic(path) > 1)) {
+                fluidSuspicious.add(e.id().toString());
+            }
+        }
+        QuickHatch.LOGGER.info("[selftest] sub-filters: {} problems={} suspicious-fluid-hatches={} -> {}",
+                summary.toString().trim(), problems.isEmpty() ? "(none)" : problems,
+                fluidSuspicious.isEmpty() ? "(none)" : fluidSuspicious,
+                (problems.isEmpty() && fluidSuspicious.isEmpty()) ? "PASS" : "FAIL");
+    }
+
+    /**
+     * 分类规则自检（纯 id 判定，<b>不依赖那些模组是否装在开发环境里</b>）：
+     * 蒸汽仓 → 能量仓 + 蒸汽档；中子加速器 → 中子加速器分类；
+     * 方块总线 / 嬗变总线 / 物料谱解析仓 / 万象转录节点 / 中子传感器 → 其他。
+     */
+    private static void logClassifyRules() {
+        record Rule(String id, HatchIndex.Category category) {}
+        List<Rule> rules = List.of(
+                new Rule("gtceu:large_steam_input_hatch", HatchIndex.Category.ENERGY_HATCH),
+                new Rule("gtceu:mega_steam_input_hatch", HatchIndex.Category.ENERGY_HATCH),
+                new Rule("gtceu:mega_steam_output_hatch", HatchIndex.Category.ENERGY_HATCH),
+                new Rule("gtladditions:huge_steam_input_hatch", HatchIndex.Category.ENERGY_HATCH),
+                // 蒸汽总线是"总线"，不是能量仓（用户第二十一轮纠正）；电压档仍是"蒸汽"（第二十二轮）
+                new Rule("gtceu:steam_input_bus", HatchIndex.Category.BUS),
+                new Rule("gtceu:steam_output_bus", HatchIndex.Category.BUS),
+                // 通行仓：物品→总线、流体→流体仓（第二十二轮）
+                new Rule("gtceu:lv_item_passthrough_hatch", HatchIndex.Category.BUS),
+                new Rule("gtceu:lv_fluid_passthrough_hatch", HatchIndex.Category.FLUID_HATCH),
+                // 巨型输入/输出总线（GTM Things 的 *_huge_item_import_bus_* / export，tier 在后缀）
+                new Rule("gtmthings:huge_item_import_bus_lv", HatchIndex.Category.BUS),
+                new Rule("gtmthings:huge_item_export_bus_lv", HatchIndex.Category.BUS),
+                // 变电站能源仓/动力仓：id 里没有 energy，但是能量仓（第二十三轮：以前跑流体仓去了）
+                new Rule("gtceu:ev_substation_input_hatch_64a", HatchIndex.Category.ENERGY_HATCH),
+                new Rule("gtceu:ev_substation_output_hatch_64a", HatchIndex.Category.ENERGY_HATCH),
+                // 多重流体仓仍然是流体仓（4x / 9x，没有电流标记，不受上面的电流兜底影响）
+                new Rule("gtceu:ev_input_hatch_4x", HatchIndex.Category.FLUID_HATCH),
+                new Rule("gtceu:max_input_hatch_9x", HatchIndex.Category.FLUID_HATCH),
+                // 焦炉仓：名字带 hatch 但谁也管不着 → 兜底进"其他"
+                new Rule("gtceu:coke_oven_hatch", HatchIndex.Category.MISC),
+                new Rule("gtceu:lv_neutron_accelerator", HatchIndex.Category.NEUTRON_ACCELERATOR),
+                new Rule("gtceu:max_neutron_accelerator", HatchIndex.Category.NEUTRON_ACCELERATOR),
+                new Rule("gtceu:block_bus", HatchIndex.Category.MISC),
+                new Rule("gtceu:neutron_sensor", HatchIndex.Category.MISC),
+                new Rule("gtladditions:me_block_conservation", HatchIndex.Category.MISC),
+                new Rule("gtladditions:spectral_analysis_hatch", HatchIndex.Category.MISC),
+                new Rule("gtladditions:vientiane_transcription_node", HatchIndex.Category.MISC));
+        List<String> wrong = new ArrayList<>();
+        for (Rule rule : rules) {
+            HatchIndex.Category actual = HatchIndex.categorizeId(rule.id());
+            if (actual != rule.category()) {
+                wrong.add(rule.id() + "=" + actual);
+            }
+        }
+        // 蒸汽总线的输入输出角色（用户要求它们能被"输入/输出"筛选）
+        boolean steamBusIo = HatchIndex.ioRoleOfPublic("steam_input_bus", HatchIndex.Category.BUS)
+                == HatchIndex.IoRole.INPUT
+                && HatchIndex.ioRoleOfPublic("steam_output_bus", HatchIndex.Category.BUS)
+                == HatchIndex.IoRole.OUTPUT;
+        // 巨型输入/输出总线（import/export 命名）也要有输入输出角色
+        boolean hugeBusIo = HatchIndex.ioRoleOfPublic("huge_item_import_bus_lv", HatchIndex.Category.BUS)
+                == HatchIndex.IoRole.INPUT
+                && HatchIndex.ioRoleOfPublic("huge_item_export_bus_lv", HatchIndex.Category.BUS)
+                == HatchIndex.IoRole.OUTPUT;
+        // 电压档：蒸汽仓与蒸汽总线都算"蒸汽"（这样电压列的"蒸汽"筛选能把它们都筛出来）；
+        // 通行仓/巨型总线用它们自己的 GT 电压；"其他"没有电压档
+        boolean steamTier = HatchIndex.tierOf(HatchIndex.Category.ENERGY_HATCH,
+                "large_steam_input_hatch", 1) == HatchIndex.TIER_STEAM
+                && HatchIndex.tierOf(HatchIndex.Category.BUS, "steam_input_bus", 1) == HatchIndex.TIER_STEAM
+                && HatchIndex.tierOf(HatchIndex.Category.FLUID_HATCH, "lv_fluid_passthrough_hatch", 1) == 1
+                && HatchIndex.tierOf(HatchIndex.Category.BUS, "huge_item_import_bus_lv", 1) == 1
+                && HatchIndex.tierOf(HatchIndex.Category.MISC, "block_bus", 1) == -1;
+        QuickHatch.LOGGER.info("[selftest] classify rules: {} cases wrong={} steamBusIo={} hugeBusIo={} "
+                        + "tierRules={} -> {}",
+                rules.size(), wrong.isEmpty() ? "(none)" : wrong, steamBusIo, hugeBusIo, steamTier,
+                (wrong.isEmpty() && steamBusIo && hugeBusIo && steamTier) ? "PASS" : "FAIL");
+        logAmperageProbe();
+    }
+
+    /** 电流档自检（普通能源仓/动力仓 = 2A，无线版 = 1A，带标记的按标记）。 */
+    private static void logAmperageProbe() {
+        boolean ampRules = HatchIndex.amperageOfPublic("lv_energy_input_hatch") == 2
+                && HatchIndex.amperageOfPublic("max_energy_output_hatch") == 2
+                && HatchIndex.amperageOfPublic("lv_energy_input_hatch_4a") == 4
+                && HatchIndex.amperageOfPublic("ev_substation_input_hatch_64a") == 64
+                && HatchIndex.amperageOfPublic("wireless_energy_input_hatch") == 1
+                && HatchIndex.amperageOfPublic("lv_input_bus") == 1;
+        // 数据面：索引里每个"基础能源仓/动力仓"都必须是 2A
+        List<String> ampWrong = new ArrayList<>();
+        for (HatchIndex.Entry e : HatchIndex.get()) {
+            String path = e.id().getPath();
+            if (e.category() != HatchIndex.Category.ENERGY_HATCH) continue;
+            if (HatchIndex.isStandardTwoAmpEnergyHatch(path) && e.amperage() != 2) {
+                ampWrong.add(e.id() + "=" + e.amperage() + "A");
+            }
+        }
+        QuickHatch.LOGGER.info("[selftest] amperage: ruleCases={} indexWrong={} -> {}",
+                ampRules, ampWrong.isEmpty() ? "(none)" : ampWrong,
+                (ampRules && ampWrong.isEmpty()) ? "PASS" : "FAIL");
+    }
+
+    /**
+     * 替换目标的边界自检（用户第二十一轮：<b>不是界面里所有方块都能触发替换</b>）：
+     * 线缆 / 管道 / AE 方块都不该是可替换目标，而普通仓室（输入总线）与焦炉仓应该是。
+     */
+    private static void logReplaceBoundary() {
+        List<String> leaked = new ArrayList<>();
+        List<String> samples = new ArrayList<>();
+        for (HatchIndex.Entry e : HatchIndex.get()) {
+            if (!(e.item() instanceof net.minecraft.world.item.BlockItem blockItem)) continue;
+            boolean replaceable = dev.uninery.quickhatch.platform.MultiblockRegistry
+                    .isReplaceable(blockItem.getBlock());
+            if (!HatchIndex.isHatchCategory(e.category()) && replaceable) {
+                leaked.add(e.id().toString());
+            }
+            // 各挑一个样本，方便日志里看：一条线缆、一条管道
+            if (samples.size() < 2 && (e.category() == HatchIndex.Category.CABLE
+                    || e.category() == HatchIndex.Category.PIPE)) {
+                samples.add(e.id().getPath() + "=" + replaceable);
+            }
+        }
+        List<String> hatchExamples = new ArrayList<>();
+        for (String id : List.of("gtceu:lv_input_bus", "gtceu:coke_oven_hatch")) {
+            HatchIndex.Entry e = entryOf(id);
+            if (e == null) continue;
+            hatchExamples.add(id + "=" + dev.uninery.quickhatch.platform.MultiblockRegistry
+                    .isReplaceable(((net.minecraft.world.item.BlockItem) e.item()).getBlock()));
+        }
+        boolean hatchesOk = !hatchExamples.isEmpty()
+                && hatchExamples.stream().allMatch(s -> s.endsWith("=true"));
+        QuickHatch.LOGGER.info("[selftest] replace boundary: non-hatch leaked={} sample(cable/pipe)={} "
+                        + "hatches={} -> {}",
+                leaked.isEmpty() ? "(none)" : leaked, samples, hatchExamples,
+                (leaked.isEmpty() && hatchesOk) ? "PASS" : "FAIL");
+
+        // 索引覆盖率：名字像仓/总线的机器有没有被漏掉（焦炉仓就是这么被抓出来的）
+        List<String> missing = new ArrayList<>();
+        for (var entry : com.gregtechceu.gtceu.api.registry.GTRegistries.MACHINES.entries()) {
+            if (entry.getValue() instanceof com.gregtechceu.gtceu.api.machine.MultiblockMachineDefinition) {
+                continue;
+            }
+            String path = entry.getKey().getPath();
+            if (!path.endsWith("_hatch") && !path.endsWith("_bus")) continue;
+            if (entryOf(entry.getKey().toString()) == null) missing.add(entry.getKey().toString());
+        }
+        QuickHatch.LOGGER.info("[selftest] index coverage: hatch/bus machines not indexed={} -> {}",
+                missing.isEmpty() ? "(none)" : missing, missing.isEmpty() ? "PASS" : "FAIL");
+    }
+
+    /** 创造模式：拉取凭空生成（网络里没有也能给），替换不消耗物品。 */
+    private static void logCreativeProbes(ServerLevel level) {
+        Item hatch = itemOf("gtceu:lv_input_bus");
+        Item other = itemOf("gtceu:lv_output_bus");
+        if (hatch == null || other == null) {
+            QuickHatch.LOGGER.info("[selftest] creative probe skipped: bus items missing");
+            return;
+        }
+        var fake = net.minecraftforge.common.util.FakePlayerFactory.getMinecraft(level);
+        fake.getInventory().clearContent();
+        fake.getInventory().selected = 0;
+
+        // a) 拉取：身上、背包、网络里全都没有 → 创造模式直接凭空变出来
+        //    （创造开关直接传进去：FakePlayer 的 isCreative() 不可靠，这里 fake.isCreative()=… 只作参考）
+        boolean nothingBefore = countInInv(fake, hatch) == 0;
+        PullService.handle(new dev.uninery.quickhatch.network.ServerboundPullItemPacket(
+                BuiltInRegistries.ITEM.getKey(hatch), 64, true), fake, true);
+        ItemStack got = fake.getInventory().getItem(0);
+        boolean created = nothingBefore && got.is(hatch)
+                && got.getCount() == Math.max(1, new ItemStack(hatch).getMaxStackSize());
+
+        // b) 替换：手里没有仓室也能换，且不消耗任何东西、旧方块也不返还（原版创造模式不掉落）
+        BlockPos base = level.getSharedSpawnPos();
+        level.setChunkForced(base.getX() >> 4, base.getZ() >> 4, true);
+        BlockPos pos = base.offset(7, 0, 1);
+        BlockState oldState = level.getBlockState(pos);
+        level.setBlockAndUpdate(pos, ((net.minecraft.world.item.BlockItem) other)
+                .getBlock().defaultBlockState());
+        fake.getInventory().clearContent();
+        int before = countInInv(fake, hatch);
+        ReplaceService.handle(new dev.uninery.quickhatch.network.ServerboundReplaceHatchPacket(
+                BuiltInRegistries.ITEM.getKey(hatch), pos), fake, true);
+        boolean swapped = level.getBlockState(pos).getBlock()
+                == ((net.minecraft.world.item.BlockItem) hatch).getBlock();
+        boolean notConsumed = countInInv(fake, hatch) == before;
+        boolean notGivenBack = countInInv(fake, other) == 0;
+
+        QuickHatch.LOGGER.info("[selftest] creative: pull-created={} ({}x{}) replace-swapped={} "
+                        + "hatchNotConsumed={} oldBlockNotReturned={} (fake.isCreative={}) -> {}",
+                created, got.is(hatch) ? got.getCount() : 0, BuiltInRegistries.ITEM.getKey(hatch),
+                swapped, notConsumed, notGivenBack, fake.isCreative(),
+                (created && swapped && notConsumed && notGivenBack) ? "PASS" : "FAIL");
+
+        level.setBlockAndUpdate(pos, oldState);
+        fake.getInventory().clearContent();
+    }
+
+    private static boolean hasCategory(String name) {
+        for (HatchIndex.Category c : HatchIndex.Category.values()) {
+            if (c.name().equals(name)) return true;
+        }
+        return false;
+    }
+
+    /** 索引里按 id 找一条（找不到返回 null）。 */
+    private static HatchIndex.Entry entryOf(String id) {
+        ResourceLocation rl = ResourceLocation.tryParse(id);
+        if (rl == null) return null;
+        for (HatchIndex.Entry e : HatchIndex.get()) {
+            if (e.id().equals(rl)) return e;
+        }
+        return null;
     }
 
     /**
