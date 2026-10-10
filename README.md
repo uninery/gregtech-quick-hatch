@@ -1,6 +1,6 @@
 # 快捷仓室 (Quick Hatch)
 
-代码全是glm5.3f和ds4.1f写的，很多有的bug反复修了好几遍，还有的死活修不好让他抄eaep才修好（🙏赞美伟大的eaep🙏），曾经想实现一些更进一步的功能但是死活写不好就删了，所以删删改改代码可能乱七八糟的
+代码全是glm5.3，glm5.3f和ds4.1f写的，很多有的bug反复修了好几遍，还有的死活修不好让他抄eaep才修好（🙏赞美伟大的eaep🙏），曾经想实现一些更进一步的功能但是死活写不好就删了，所以删删改改代码可能乱七八糟的
 
 一个 [GregTech CEu Modern](https://github.com/GregTechCEu/GregTech-Modern)（GTCEu Modern）辅助模组，让建多方块结构时摆放仓室快得飞起。
 
