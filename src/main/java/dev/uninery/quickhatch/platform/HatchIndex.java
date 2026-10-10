@@ -638,6 +638,9 @@ public final class HatchIndex {
         // 中子加速器（中子活化器的仓室）：lv_neutron_accelerator … max_neutron_accelerator
         if (path.endsWith("neutron_accelerator")) return Category.NEUTRON_ACCELERATOR;
         if (path.contains("maintenance")) return Category.MAINTENANCE;
+        // 重力控制仓 / 可配置重力控制仓（gtceu:gravity_hatch / gravity_configuration_hatch）：
+        // 用户第二十六轮要求归"维护仓"（不然会掉进"其他"）
+        if (path.contains("gravity")) return Category.MAINTENANCE;
         if (path.contains("muffler")) return Category.MUFFLER;
         if (path.contains("rotor")) return Category.ROTOR;
         // 并行控制仓（Parallel Control Hatch）：GTCEu/GTLCore 注册 id 是
@@ -755,12 +758,13 @@ public final class HatchIndex {
 
     /**
      * 输入输出角色：源仓=输出、靶仓=输入。
-     * 靶仓/输入：target、*_input、transmitter、<b>import</b>（巨型输入总线之类）；
+     * 靶仓/输入：target、*_input、transmitter、<b>import</b>（巨型输入总线之类）、
+     * <b>stock</b>（ME 库存输入总成 me_dual_hatch_stock_part_machine 之类，名字里没有 input）；
      * 源仓/输出：source、*_output、receiver、<b>export</b>。
      */
     static IoRole ioRoleOf(String path, Category category) {
         boolean input = path.contains("target") || path.contains("_input") || path.contains("transmitter")
-                || path.contains("import");
+                || path.contains("import") || path.contains("stock");
         boolean output = path.contains("source") || path.contains("_output") || path.contains("receiver")
                 || path.contains("export");
         if (input) return IoRole.INPUT;

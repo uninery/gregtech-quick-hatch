@@ -20,6 +20,10 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.gameevent.GameEvent;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.level.BlockEvent;
+import net.minecraftforge.common.util.BlockSnapshot;
 
 /**
  * 替换服务：界面在"对着可替换方块"打开时，左键点一个仓室 = 原地替换那个方块。
@@ -75,14 +79,35 @@ public final class ReplaceService {
             fail(player, "message.quickhatch.no_item");
             return;
         }
-        // 原地破坏 + 放下仓室（朝向玩家）
+        // 放下仓室：照原版 BlockItem.place 的流程走 ——
+        // ① 先发 EntityPlaceEvent（保护类模组 / GTLCore 那种"放置时接入无线网络"的监听器都看这个事件）、
+        // ② setBlock、③ setPlacedBy、④ 放置游戏事件与音效。
+        //
+        // ③ 是关键：GTCEu 的 MetaMachineBlock#setPlacedBy 会给机器写 ownerUUID 并调用
+        // IMachineLife#onMachinePlaced —— GTM Things 的无线能源仓就是靠这个钩子接入
+        // "无线能源网络"的。以前我们只 setBlock，机器既没有 owner 也没跑 onMachinePlaced，
+        // 所以替换出来的无线能量仓不会自动连上（用户第二十六轮报的现象）。
+        ItemStack placedStack = new ItemStack(item);
         MachineDefinition definition = machineItem.getDefinition();
         BlockState newState = definition.defaultBlockState();
         if (newState.hasProperty(BlockStateProperties.FACING)
                 && newState.getValue(BlockStateProperties.FACING) instanceof Direction) {
             newState = newState.setValue(BlockStateProperties.FACING, player.getDirection().getOpposite());
         }
+        BlockEvent.EntityPlaceEvent placeEvent = new BlockEvent.EntityPlaceEvent(
+                BlockSnapshot.create(level.dimension(), level, pos), oldState, player);
+        MinecraftForge.EVENT_BUS.post(placeEvent);
+        if (placeEvent.isCanceled()) {
+            // 放置被别的模组拦下：把刚扣掉的仓室还回去，原方块保持不动
+            if (!creative) {
+                giveBack(player, new ItemStack(item));
+            }
+            fail(player, "message.quickhatch.place_denied");
+            return;
+        }
         level.setBlock(pos, newState, Block.UPDATE_ALL);
+        newState.getBlock().setPlacedBy(level, pos, newState, player, placedStack);
+        level.gameEvent(GameEvent.BLOCK_PLACE, pos, GameEvent.Context.of(player, newState));
         // 被破坏的方块直接还给身上（**不碰手上那一格**，见 giveBack）；
         // 创造模式不给（原版创造模式破坏方块也不会掉落）
         ItemStack oldStack = new ItemStack(oldState.getBlock());

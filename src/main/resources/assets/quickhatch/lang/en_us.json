@@ -11,6 +11,7 @@
   "message.quickhatch.not_craftable": "Item is not craftable in the ME network",
   "message.quickhatch.not_hatch": "Not a hatch item",
   "message.quickhatch.not_replaceable": "This block cannot be replaced",
+  "message.quickhatch.place_denied": "Placing a hatch here is not allowed",
   "message.quickhatch.replaced": "Hatch placed, original block returned",
   "message.quickhatch.too_far": "Target block is too far away",
   "quickhatch.ae.block": "Blocks",
