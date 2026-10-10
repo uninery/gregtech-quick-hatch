@@ -11,6 +11,7 @@
   "message.quickhatch.not_craftable": "该物品不在 ME 合成网络中",
   "message.quickhatch.not_hatch": "这不是仓室物品",
   "message.quickhatch.not_replaceable": "该方块不可替换",
+  "message.quickhatch.place_denied": "这里不允许放置仓室",
   "message.quickhatch.replaced": "仓室已替换，原方块已放回身上",
   "message.quickhatch.too_far": "目标方块太远了",
   "quickhatch.ae.block": "方块",

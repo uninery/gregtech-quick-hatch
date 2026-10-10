@@ -268,6 +268,9 @@ public final class QuickHatchDebug {
                 new Rule("gtceu:max_input_hatch_9x", HatchIndex.Category.FLUID_HATCH),
                 // 焦炉仓：名字带 hatch 但谁也管不着 → 兜底进"其他"
                 new Rule("gtceu:coke_oven_hatch", HatchIndex.Category.MISC),
+                // 重力控制仓 / 可配置重力控制仓 → 维护仓（第二十六轮）
+                new Rule("gtceu:gravity_hatch", HatchIndex.Category.MAINTENANCE),
+                new Rule("gtceu:gravity_configuration_hatch", HatchIndex.Category.MAINTENANCE),
                 new Rule("gtceu:lv_neutron_accelerator", HatchIndex.Category.NEUTRON_ACCELERATOR),
                 new Rule("gtceu:max_neutron_accelerator", HatchIndex.Category.NEUTRON_ACCELERATOR),
                 new Rule("gtceu:block_bus", HatchIndex.Category.MISC),
@@ -292,6 +295,14 @@ public final class QuickHatchDebug {
                 == HatchIndex.IoRole.INPUT
                 && HatchIndex.ioRoleOfPublic("huge_item_export_bus_lv", HatchIndex.Category.BUS)
                 == HatchIndex.IoRole.OUTPUT;
+        // 库存类（stock）也是输入：ME库存输入总成 me_dual_hatch_stock_part_machine 的 id 里
+        // 没有 input，以前点"输入"筛不出来（用户第二十六轮）
+        boolean stockIo = HatchIndex.ioRoleOfPublic("me_dual_hatch_stock_part_machine", HatchIndex.Category.ME)
+                == HatchIndex.IoRole.INPUT
+                && HatchIndex.ioRoleOfPublic("tag_filter_me_stock_bus_part_machine", HatchIndex.Category.ME)
+                == HatchIndex.IoRole.INPUT
+                && HatchIndex.ioRoleOfPublic("me_stocking_input_bus", HatchIndex.Category.BUS)
+                == HatchIndex.IoRole.INPUT;
         // 电压档：蒸汽仓与蒸汽总线都算"蒸汽"（这样电压列的"蒸汽"筛选能把它们都筛出来）；
         // 通行仓/巨型总线用它们自己的 GT 电压；"其他"没有电压档
         boolean steamTier = HatchIndex.tierOf(HatchIndex.Category.ENERGY_HATCH,
@@ -301,9 +312,9 @@ public final class QuickHatchDebug {
                 && HatchIndex.tierOf(HatchIndex.Category.BUS, "huge_item_import_bus_lv", 1) == 1
                 && HatchIndex.tierOf(HatchIndex.Category.MISC, "block_bus", 1) == -1;
         QuickHatch.LOGGER.info("[selftest] classify rules: {} cases wrong={} steamBusIo={} hugeBusIo={} "
-                        + "tierRules={} -> {}",
-                rules.size(), wrong.isEmpty() ? "(none)" : wrong, steamBusIo, hugeBusIo, steamTier,
-                (wrong.isEmpty() && steamBusIo && hugeBusIo && steamTier) ? "PASS" : "FAIL");
+                        + "stockIo={} tierRules={} -> {}",
+                rules.size(), wrong.isEmpty() ? "(none)" : wrong, steamBusIo, hugeBusIo, stockIo, steamTier,
+                (wrong.isEmpty() && steamBusIo && hugeBusIo && stockIo && steamTier) ? "PASS" : "FAIL");
         logAmperageProbe();
     }
 
@@ -499,12 +510,48 @@ public final class QuickHatchDebug {
         boolean returned = countInInv(fake, from) > 0;
         ItemStack held = fake.getInventory().getItem(0);
         boolean heldUntouched = held.is(Items.STONE) && held.getCount() == 3;
+        // 放置流程走对了的证据：GTCEu 的 MetaMachineBlock#setPlacedBy 会给机器写 ownerUUID，
+        // 并调用 IMachineLife#onMachinePlaced —— GTM Things 的无线能源仓正是靠这个钩子接入
+        // "无线能源网络"（用户第二十六轮报"替换出来的无线能量仓不会自动连上"）。
+        // 放置流程是否真的走到了 setPlacedBy / onMachinePlaced 的证据。
+        // 注意各版本 GTCEu 暴露的 owner API 不一样（7.5.3 有 public getOwnerUUID()，1.4.4 没有），
+        // 所以用反射探测：能查到就断言，API 不存在就只记录、不判 FAIL。
+        // （无论哪个版本，MetaMachineBlock#setPlacedBy 都会调 IMachineLife#onMachinePlaced —— 已对着
+        //   GTCEu 7.5.3 与 1.4.4 的源码确认；GTM Things 的无线能源仓就在 onMachinePlaced 里绑定玩家。）
+        java.util.UUID owner = null;
+        boolean ownerCheckable = false;
+        var machine = com.gregtechceu.gtceu.api.machine.MetaMachine.getMachine(level, pos);
+        if (machine != null) {
+            try {
+                var getter = machine.getClass().getMethod("getOwnerUUID");
+                ownerCheckable = true;
+                owner = (java.util.UUID) getter.invoke(machine);
+            } catch (Throwable ignored) {
+            }
+            for (Class<?> c = machine.getClass(); c != null && owner == null; c = c.getSuperclass()) {
+                for (var field : c.getDeclaredFields()) {
+                    if (!java.util.UUID.class.equals(field.getType())
+                            || !field.getName().toLowerCase().contains("owner")) {
+                        continue;
+                    }
+                    try {
+                        field.setAccessible(true);
+                        owner = (java.util.UUID) field.get(machine);
+                    } catch (Throwable ignored) {
+                    }
+                    if (owner != null) break;
+                }
+            }
+        }
+        boolean ownerSet = owner != null && owner.equals(fake.getUUID());
 
         QuickHatch.LOGGER.info("[selftest] placed-hatch replace at {}: isReplaceable={} {} -> {} "
-                        + "swapped={} consumed={} oldReturned={} heldSlotUntouched={} -> {}",
+                        + "swapped={} consumed={} oldReturned={} heldSlotUntouched={} ownerSet={} "
+                        + "(ownerCheckable={}) -> {}",
                 pos, replaceable, BuiltInRegistries.ITEM.getKey(from), BuiltInRegistries.ITEM.getKey(to),
-                swapped, consumed, returned, heldUntouched,
-                (replaceable && swapped && consumed && returned && heldUntouched) ? "PASS" : "FAIL");
+                swapped, consumed, returned, heldUntouched, ownerSet, ownerCheckable,
+                (replaceable && swapped && consumed && returned && heldUntouched
+                        && (!ownerCheckable || ownerSet)) ? "PASS" : "FAIL");
     }
 
     /**
