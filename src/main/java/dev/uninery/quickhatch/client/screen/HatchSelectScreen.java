@@ -85,7 +85,9 @@ public class HatchSelectScreen extends Screen {
                                HatchIndex.IoRole io, HatchIndex.SubOption sub, String search) {}
 
     /** 退出界面时是否保留手动筛选（整个游戏会话内记住）。默认关闭 = 每次全新筛选。 */
-    private static boolean keepFilters = false;
+    private static boolean keepFilters() {
+        return dev.uninery.quickhatch.QuickHatchConfig.keepFilters();
+    }
 
     /** 上次关闭界面时的手动筛选（keepFilters 打开时用于恢复）。 */
     private static FilterState lastFilters;
@@ -143,7 +145,7 @@ public class HatchSelectScreen extends Screen {
         ioFilter = null;
         subFilter = null;
         search = "";
-        FilterState restored = keepFilters ? lastFilters : null;
+        FilterState restored = keepFilters() ? lastFilters : null;
         if (restored != null) {
             activeCategory = restored.category();
             tierFilter = restored.tier();
@@ -213,9 +215,10 @@ public class HatchSelectScreen extends Screen {
         renderKeepFilterToggle(gfx, mouseX, mouseY);
     }
 
-    /** 底部"筛选: 保留 / 不保留"开关（需求 6 恢复）。 */
+    /** 底部"筛选: 保留 / 不保留"开关（需求 6 恢复；开关状态存在配置文件里）。 */
     private void renderKeepFilterToggle(GuiGraphics gfx, int mx, int my) {
-        String label = Component.translatable(keepFilters
+        boolean on = keepFilters();
+        String label = Component.translatable(on
                 ? "quickhatch.screen.keep_filter.on" : "quickhatch.screen.keep_filter.off").getString();
         int w = this.font.width(label) + 10;
         int h = CHIP_H + 4;
@@ -223,9 +226,9 @@ public class HatchSelectScreen extends Screen {
         int y = gridBottom + 6;
         boolean hover = mx >= x && mx < x + w && my >= y && my < y + h;
         gfx.fill(x, y, x + w, y + h,
-                keepFilters ? (hover ? 0xFF3D6E96 : 0xFF2F5A7A) : (hover ? 0xFF2A2E36 : 0xFF20242C));
+                on ? (hover ? 0xFF3D6E96 : 0xFF2F5A7A) : (hover ? 0xFF2A2E36 : 0xFF20242C));
         gfx.drawString(this.font, label, x + 5, y + 3,
-                keepFilters ? 0xFFFFFFFF : 0xFFB8BCC4, false);
+                on ? 0xFFFFFFFF : 0xFFB8BCC4, false);
         keepFilterButtonBounds = new int[]{x, y, w, h};
     }
 
@@ -237,7 +240,7 @@ public class HatchSelectScreen extends Screen {
 
     @Override
     public void onClose() {
-        if (keepFilters) {
+        if (keepFilters()) {
             rememberFilters();
         }
         super.onClose();
@@ -507,8 +510,10 @@ public class HatchSelectScreen extends Screen {
             int[] b = keepFilterButtonBounds;
             if (mouseX >= b[0] && mouseX < b[0] + b[2]
                     && mouseY >= b[1] && mouseY < b[1] + b[3]) {
-                keepFilters = !keepFilters;
-                if (keepFilters) {
+                boolean next = !keepFilters();
+                // 开关状态写配置文件（重进游戏也记得）
+                dev.uninery.quickhatch.QuickHatchConfig.setKeepFilters(next);
+                if (next) {
                     rememberFilters();
                 } else {
                     lastFilters = null;
