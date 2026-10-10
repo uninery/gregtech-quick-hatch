@@ -191,8 +191,37 @@ public final class QuickHatchDebug {
 
         logClassifyRules();
         logSubFilterProbes();
+        logConfigProbe();
         logReplaceBoundary();
         logCreativeProbes(level);
+    }
+
+    /** 配置自检只跑一次（自检会对多个物品各跑一遍）。 */
+    private static boolean configProbeDone;
+
+    /**
+     * 配置文件自检（第二十七轮：用户要求把"是否保留筛选"的开关写进配置文件）。
+     *
+     * <p>验证四件事：配置加载了、能写、<b>真的落盘到 config/quickhatch-common.toml</b>、
+     * 还能还原成原值（不污染用户配置）。</p>
+     */
+    private static void logConfigProbe() {
+        if (configProbeDone) return;
+        configProbeDone = true;
+        boolean loaded = dev.uninery.quickhatch.QuickHatchConfig.isLoaded();
+        boolean initial = dev.uninery.quickhatch.QuickHatchConfig.keepFilters();
+        dev.uninery.quickhatch.QuickHatchConfig.setKeepFilters(true);
+        boolean readBack = dev.uninery.quickhatch.QuickHatchConfig.keepFilters();
+        boolean onDisk = dev.uninery.quickhatch.QuickHatchConfig.fileText().contains("keepFilters = true");
+        dev.uninery.quickhatch.QuickHatchConfig.setKeepFilters(initial);
+        boolean restored = dev.uninery.quickhatch.QuickHatchConfig.keepFilters() == initial;
+        boolean diskRestored = dev.uninery.quickhatch.QuickHatchConfig.fileText()
+                .contains("keepFilters = " + initial);
+        QuickHatch.LOGGER.info("[selftest] config: loaded={} initial={} readBack={} onDisk={} restored={} "
+                        + "diskRestored={} file={} -> {}",
+                loaded, initial, readBack, onDisk, restored, diskRestored,
+                dev.uninery.quickhatch.QuickHatchConfig.file().getFileName(),
+                (loaded && readBack && onDisk && restored && diskRestored) ? "PASS" : "FAIL");
     }
 
     /**
