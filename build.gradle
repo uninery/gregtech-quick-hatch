@@ -147,7 +147,13 @@ dependencies {
     }
 }
 
-tasks.named('jar', Jar).configure { finalizedBy 'reobfJar' }
+tasks.named('jar', Jar).configure {
+    finalizedBy 'reobfJar'
+    // LGPL-3.0 要求随产物分发许可证 —— 把仓库根的 LICENSE 打进 jar
+    from('LICENSE') {
+        into 'META-INF'
+    }
+}
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     options.release.set(17)
